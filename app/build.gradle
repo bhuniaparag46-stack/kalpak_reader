@@ -1,0 +1,46 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.kalpak.reader'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.kalpak.reader'
+        minSdk 26
+        targetSdk 34
+        versionCode((System.getenv('VERSION_CODE') ?: '1') as Integer)
+        versionName(System.getenv('VERSION_NAME') ?: '0.1.0')
+    }
+
+    // একই চাবি দিয়ে প্রতিবার সই হয়, যাতে পুরোনো সংস্করণের ওপর নতুনটা বসানো যায়।
+    signingConfigs {
+        kalpak {
+            storeFile file('kalpak.keystore')
+            storePassword 'kalpak-reader'
+            keyAlias 'kalpak'
+            keyPassword 'kalpak-reader'
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.kalpak
+        }
+        debug {
+            signingConfig signingConfigs.kalpak
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
+    }
+}

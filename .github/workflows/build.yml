@@ -1,0 +1,64 @@
+name: APK তৈরি
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      VERSION_CODE: ${{ github.run_number }}
+      VERSION_NAME: 0.1.${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: খোলা লাইসেন্সের বাংলা হরফ নামানো
+        run: |
+          set +e
+          cd app/src/main/assets/fonts
+          B=https://raw.githubusercontent.com/google/fonts/main/ofl
+          get() { curl -fsSL --retry 3 -o "$2" "$B/$1" && echo "পাওয়া গেল: $2" || { rm -f "$2"; echo "::warning::পাওয়া গেল না: $1"; }; }
+          get "tirobangla/TiroBangla-Regular.ttf" TiroBangla-Regular.ttf
+          get "hindsiliguri/HindSiliguri-Regular.ttf" HindSiliguri-Regular.ttf
+          get "hindsiliguri/HindSiliguri-SemiBold.ttf" HindSiliguri-SemiBold.ttf
+          get "notosansbengali/NotoSansBengali%5Bwdth%2Cwght%5D.ttf" NotoSansBengali-Variable.ttf
+          get "notoserifbengali/OFL.txt" OFL-NotoSerifBengali.txt
+          get "notosansbengali/OFL.txt" OFL-NotoSansBengali.txt
+          get "tirobangla/OFL.txt" OFL-TiroBangla.txt
+          get "hindsiliguri/OFL.txt" OFL-HindSiliguri.txt
+          ls -la
+          exit 0
+
+      - name: APK বানানো
+        run: gradle :app:assembleRelease --no-daemon --stacktrace
+
+      - name: ফাইলের নাম ঠিক করা
+        run: cp app/build/outputs/apk/release/app-release.apk "KalpakReader-${VERSION_NAME}.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KalpakReader-${{ env.VERSION_NAME }}
+          path: KalpakReader-*.apk
+
+      - name: Releases-এ প্রকাশ
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${VERSION_NAME}" "KalpakReader-${VERSION_NAME}.apk" \
+            --title "কল্পক রিডার ${VERSION_NAME}" \
+            --notes "নিচের Assets থেকে APK ফাইলটি নামিয়ে ফোনে বসান। আগের সংস্করণ থাকলে তার ওপরেই বসবে, পড়ার তথ্য মুছবে না।" \
+            --target "${GITHUB_SHA}"

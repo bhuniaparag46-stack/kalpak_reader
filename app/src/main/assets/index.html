@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="bn">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>কল্পক রিডার</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body class="t-paper">
+<div id="app"></div>
+<input id="picker" type="file" hidden>
+<div id="busy" hidden><div class="busybox"><div class="spin" aria-hidden="true"></div><span id="busytext">নথি খোলা হচ্ছে…</span></div></div>
+<div id="toast" role="status" hidden></div>
+<div id="dialog" hidden></div>
+<script src="zip.js"></script>
+<script src="parse.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
