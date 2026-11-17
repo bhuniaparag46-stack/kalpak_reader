@@ -47,11 +47,14 @@
 
   function norm(text) {
     var t = String(text || '');
+    /* অন্য হরফের লেখা বাংলা হরফে এনে একই কণ্ঠে পড়ানো */
+    if (g.KTranslit) t = g.KTranslit.latin(g.KTranslit.devanagari(t));
     t = t.replace(/[“”„«»]/g, '"').replace(/[‚`´]/g, '’').replace(/…+|\.{2,}/g, ', ').replace(/[–―]/g, '—').replace(/৷/g, '।');
     t = t.replace(/([০-৯0-9]+)[.,]([০-৯0-9]+)/g, function (m, a, b) {
       return number(a) + ' দশমিক ' + ascii(b).split('').map(function (c) { return W[+c]; }).join(' ');
     });
     t = t.replace(/[০-৯0-9]+/g, function (m) { return number(m); });
+    t = t.replace(/দুই(টো|টি|টা|জন|খানা)/g, 'দু$1');
     t = t.replace(/%/g, ' শতাংশ ').replace(/&/g, ' ও ').replace(/[*_#~|\\/=+^]/g, ' ');
     return t.replace(/\s+/g, ' ').trim();
   }
