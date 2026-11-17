@@ -132,6 +132,28 @@ class Voc(torch.nn.Module):
         return self.v.inference(mel)
 
 
+class SimpleAttn(torch.nn.Module):
+    """এক-মাথা self-attention; ইনপুট [T, 1, C]"""
+
+    def __init__(self, mha):
+        super().__init__()
+        c = mha.embed_dim
+        self.scale = float(c) ** -0.5
+        w, bias = mha.in_proj_weight.detach(), mha.in_proj_bias.detach()
+        self.wq, self.wk, self.wv = (torch.nn.Parameter(w[i * c:(i + 1) * c].clone(), requires_grad=False) for i in range(3))
+        self.bq, self.bk, self.bv = (torch.nn.Parameter(bias[i * c:(i + 1) * c].clone(), requires_grad=False) for i in range(3))
+        self.out = mha.out_proj
+
+    def forward(self, query, key=None, value=None, attn_mask=None, key_padding_mask=None, need_weights=True):
+        x = query.transpose(0, 1)  # [1, T, C]
+        q = torch.nn.functional.linear(x, self.wq, self.bq) * self.scale
+        k = torch.nn.functional.linear(x, self.wk, self.bk)
+        v = torch.nn.functional.linear(x, self.wv, self.bv)
+        att = torch.softmax(torch.matmul(q, k.transpose(1, 2)), dim=-1)
+        o = self.out(torch.matmul(att, v))
+        return o.transpose(0, 1), att
+
+
 enc, dec, vocw = Enc(m).eval(), Dec(m).eval(), Voc(voc).eval()
 
 
@@ -156,6 +178,15 @@ with torch.no_grad():
     sid = torch.tensor([1], dtype=torch.long)
     ref = m.inference(x, aux_input={"d_vectors": None, "speaker_ids": sid})
     ref_mel = ref["model_outputs"].numpy()  # [1,F,80]
+    # nn.MultiheadAttention রপ্তানিতে বাক্যের দৈর্ঘ্য বেঁধে ফেলে, তাই একই ওজন দিয়ে নিজস্ব সরল রূপ বসানো
+    n_patched = 0
+    for mod in list(m.modules()):
+        for cname, child in list(mod.named_children()):
+            if isinstance(child, torch.nn.MultiheadAttention):
+                assert child.num_heads == 1 and child._qkv_same_embed_dim
+                setattr(mod, cname, SimpleAttn(child))
+                n_patched += 1
+    print("patched attention layers:", n_patched)
     h, ld = enc(x, sid)
     d = durations(ld.numpy())
     mel = dec(torch.tensor(expand(h.numpy(), d))).numpy()  # [1,80,F]
