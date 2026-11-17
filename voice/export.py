@@ -103,7 +103,7 @@ class Enc(torch.nn.Module):
 
     def forward(self, x, sid):
         m = self.m
-        x_mask = torch.ones(1, 1, x.shape[1], dtype=torch.float32)
+        x_mask = torch.ones_like(x).unsqueeze(1).to(torch.float32)
         o_en, x_mask, g, _ = m._forward_encoder(x, x_mask, sid)
         o_dr_log = m.duration_predictor(o_en, x_mask)
         o_pitch_emb, _ = m._forward_pitch_predictor(o_en, x_mask)
@@ -117,7 +117,7 @@ class Dec(torch.nn.Module):
 
     def forward(self, h):
         m = self.m
-        y_mask = torch.ones(1, 1, h.shape[2], dtype=torch.float32)
+        y_mask = torch.ones_like(h[:, :1, :])
         if hasattr(m, "pos_encoder"):
             h = m.pos_encoder(h, y_mask)
         return m.decoder(h, y_mask, g=None)
