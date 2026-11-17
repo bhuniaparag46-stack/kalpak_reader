@@ -3,6 +3,7 @@ name: APK তৈরি
 on:
   push:
     branches: [main]
+    paths-ignore: ['voice/**', '.github/workflows/voice.yml', 'README.md']
   workflow_dispatch:
 
 permissions:
