@@ -36,6 +36,7 @@ public class MainActivity extends Activity {
     private WebView web;
     private ValueCallback<Uri[]> fileCallback;
     private TextToSpeech tts;
+    private VoiceEngine voice;
     private volatile String ttsStatus = "init";
     private final Object pendingLock = new Object();
     private String pendingFile = "";
@@ -80,6 +81,9 @@ public class MainActivity extends Activity {
         });
         web.addJavascriptInterface(new Bridge(), "KalpakNative");
 
+        voice = new VoiceEngine(getFilesDir(), (channel, kind, arg) ->
+                js("window." + channel + " && window." + channel + "('" + kind + "','" + safeId(arg) + "')"));
+
         readIntent(getIntent());
         initTts();
         web.loadUrl("file:///android_asset/index.html");
@@ -117,6 +121,9 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        if (voice != null) {
+            voice.shutdown();
+        }
         if (tts != null) {
             tts.stop();
             tts.shutdown();
@@ -298,6 +305,31 @@ public class MainActivity extends Activity {
             if (tts != null) {
                 tts.setSpeechRate((float) Math.max(0.4, Math.min(2.5, rate)));
             }
+        }
+
+        @JavascriptInterface
+        public String voiceStatus() {
+            return voice.status();
+        }
+
+        @JavascriptInterface
+        public void voiceDownload() {
+            voice.download();
+        }
+
+        @JavascriptInterface
+        public void voiceDelete() {
+            voice.delete();
+        }
+
+        @JavascriptInterface
+        public void voiceSpeak(String text, String utteranceId, int speaker, double rate, String next) {
+            voice.speak(text, safeId(utteranceId), speaker, rate, next);
+        }
+
+        @JavascriptInterface
+        public void voiceStop() {
+            voice.stop();
         }
 
         @JavascriptInterface

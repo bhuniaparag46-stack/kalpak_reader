@@ -12,6 +12,9 @@ android {
         targetSdk 34
         versionCode((System.getenv('VERSION_CODE') ?: '1') as Integer)
         versionName(System.getenv('VERSION_NAME') ?: '0.1.0')
+        ndk {
+            abiFilters 'arm64-v8a', 'armeabi-v7a'
+        }
     }
 
     // একই চাবি দিয়ে প্রতিবার সই হয়, যাতে পুরোনো সংস্করণের ওপর নতুনটা বসানো যায়।
@@ -43,4 +46,9 @@ android {
         abortOnError false
         checkReleaseBuilds false
     }
+}
+
+dependencies {
+    // ফোনের ভেতরে কণ্ঠ-মডেল চালানোর জন্য
+    implementation 'com.microsoft.onnxruntime:onnxruntime-android:1.22.0'
 }

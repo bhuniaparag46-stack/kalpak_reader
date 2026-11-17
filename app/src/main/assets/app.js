@@ -19,7 +19,7 @@
   };
   var lib = store.get('lib', []);
   var marks = store.get('marks', []);
-  var prefs = Object.assign({ font: 'serif', size: 19, gap: 'm', theme: 'paper', rate: 1 }, store.get('prefs', {}));
+  var prefs = Object.assign({ font: 'serif', size: 19, gap: 'm', theme: 'paper', rate: 1, voice: 'phone' }, store.get('prefs', {}));
   var FONTS = {
     serif: { name: 'নোটো সেরিফ', css: "'K Serif', serif" },
     tiro: { name: 'তিরো বাংলা', css: "'K Tiro', 'K Serif', serif" },
@@ -340,8 +340,55 @@
   /* ---------- পাঠ শোনা ---------- */
   var tts = { on: false, paused: false, i: 0, uid: 0, sim: 0 };
   var ttsState = N && N.ttsStatus ? N.ttsStatus() : 'ready';
+  /* ভারতীয় বাংলা কণ্ঠ (ফোনের ভেতরে চলা মডেল) */
+  var voiceState = N && N.voiceStatus ? N.voiceStatus() : 'none';
+  var VOICES = { female: 'নারীকণ্ঠ', male: 'পুরুষকণ্ঠ', phone: 'ফোনের কণ্ঠ' };
+  function useVoice() { return !!(N && N.voiceSpeak) && voiceState === 'ready' && (prefs.voice === 'female' || prefs.voice === 'male'); }
+  function voiceLabel() { return useVoice() ? VOICES[prefs.voice] : VOICES.phone; }
+  window.kalpakVoice = function (kind, arg) {
+    if (kind === 'progress') {
+      voiceState = 'downloading:' + arg;
+      var el = document.getElementById('vpct');
+      if (el) el.textContent = 'নামছে ' + bn(arg) + '%';
+      else if (view === 'settings') renderSettings();
+      return;
+    }
+    if (kind === 'ready') {
+      voiceState = 'ready';
+      if (prefs.voice === 'phone') { prefs.voice = 'female'; applyPrefs(); }
+      toast('ভারতীয় বাংলা কণ্ঠ তৈরি। এখন থেকে এই কণ্ঠেই পাঠ হবে।');
+    } else if (kind === 'error') {
+      voiceState = 'none';
+      toast('কণ্ঠ নামানো গেল না। নেট সংযোগ দেখে আবার চেষ্টা করুন।');
+    } else if (kind === 'deleted') {
+      voiceState = 'none'; prefs.voice = 'phone'; applyPrefs();
+    }
+    if (view === 'settings') renderSettings();
+  };
+  function nextVoiceText() {
+    if (!cur) return '';
+    for (var k = tts.i + 1; k < cur.sents.length; k++) {
+      if (speakable(cur.sents[k])) return KVoice.norm(cur.sents[k]);
+    }
+    return '';
+  }
+  function setWaiting(on) {
+    tts.waiting = on;
+    var el = document.getElementById('linfo');
+    if (el) el.textContent = infoText();
+  }
+  function infoText() {
+    if (tts.paused) return 'পাঠ থেমে আছে · ' + voiceLabel();
+    if (tts.waiting) return 'বাক্য তৈরি হচ্ছে… · ' + voiceLabel();
+    return 'পাঠ শোনা চলছে · ' + voiceLabel();
+  }
   function speakable(t) { return /[ঀ-৿A-Za-z0-9]/.test(t || ''); }
   function nativeSpeak(text, uid) {
+    if (useVoice()) {
+      setWaiting(true);
+      N.voiceSpeak(KVoice.norm(text), String(uid), prefs.voice === 'male' ? 2 : 1, prefs.rate, nextVoiceText());
+      return;
+    }
     if (N && N.speak) { N.speak(text, String(uid)); return; }
     if (window.speechSynthesis && window.SpeechSynthesisUtterance) {
       var u = new SpeechSynthesisUtterance(text);
@@ -354,6 +401,8 @@
     tts.sim = setTimeout(function () { window.kalpakTts('done', String(uid)); }, 600);
   }
   function nativeStop() {
+    tts.waiting = false;
+    if (N && N.voiceStop) N.voiceStop();
     if (N && N.stopSpeak) N.stopSpeak();
     else if (window.speechSynthesis) speechSynthesis.cancel();
     clearTimeout(tts.sim);
@@ -384,6 +433,7 @@
   }
   window.kalpakTts = function (ev, arg) {
     if (ev === 'status') { ttsState = arg; if (view === 'settings') renderSettings(); return; }
+    if (ev === 'start') { if (String(tts.uid) === String(arg)) setWaiting(false); return; }
     if ((ev === 'done' || ev === 'error') && tts.on && !tts.paused && String(tts.uid) === String(arg)) {
       tts.fail = ev === 'error' ? (tts.fail || 0) + 1 : 0;
       if (tts.fail >= 3) { ttsStop(); toast('কণ্ঠ লেখাটি পড়তে পারছে না। “সজ্জা” থেকে কণ্ঠের সেটিং দেখে নিন।'); return; }
@@ -391,12 +441,14 @@
     }
   };
   function ttsStart() {
+    if (N && N.voiceStatus) voiceState = N.voiceStatus();
     if (N && N.ttsStatus) ttsState = N.ttsStatus();
-    if (ttsState === 'nolang' || ttsState === 'none') {
+    if (useVoice()) { /* নিজস্ব মডেল থাকলে ফোনের কণ্ঠের অবস্থা দেখার দরকার নেই */ }
+    else if (ttsState === 'nolang' || ttsState === 'none') {
       toast('এই ফোনে বাংলা পাঠের কণ্ঠ পাওয়া যায়নি। “সজ্জা” থেকে কণ্ঠের সেটিং খুলে বাংলা কণ্ঠ নামিয়ে নিন।');
       return;
     }
-    if (ttsState === 'init') { toast('কণ্ঠ তৈরি হচ্ছে, একটু পরে আবার চেষ্টা করুন।'); return; }
+    if (!useVoice() && ttsState === 'init') { toast('কণ্ঠ তৈরি হচ্ছে, একটু পরে আবার চেষ্টা করুন।'); return; }
     tts.on = true; tts.paused = false; tts.fail = 0; tts.i = firstVisibleSentence();
     if (N && N.keepAwake) N.keepAwake(true);
     renderListen(); speakCur();
@@ -426,7 +478,7 @@
       el.innerHTML = '<button class="start" data-tts="start">' + I.ear + 'পাঠ শুনুন</button>';
       return;
     }
-    el.innerHTML = '<div class="info"><span>' + (tts.paused ? 'পাঠ থেমে আছে' : 'পাঠ শোনা চলছে') + ' · ফোনের কণ্ঠ</span><span>গতি ' + rateLabel() + '</span></div><div class="ctl">' +
+    el.innerHTML = '<div class="info"><span id="linfo">' + esc(infoText()) + '</span><span>গতি ' + rateLabel() + '</span></div><div class="ctl">' +
       '<button class="rb" data-tts="rate" aria-label="গতি বদলান">' + rateLabel() + '</button>' +
       '<button class="rb plain" data-tts="prev" aria-label="আগের বাক্য">' + I.prev + '</button>' +
       '<button class="play" data-tts="toggle" aria-label="' + (tts.paused ? 'চালান' : 'থামান') + '">' + (tts.paused ? I.play : I.pause) + '</button>' +
@@ -463,9 +515,25 @@
     h += '</div><h2 class="sec">পটভূমি</h2><div class="grid3">';
     Object.keys(THEMES).forEach(function (k) { h += '<button class="opt th-' + k + (prefs.theme === k ? ' on' : '') + '" data-theme="' + k + '">' + THEMES[k] + '</button>'; });
     var st = { ready: 'চালু আছে', init: 'তৈরি হচ্ছে', nolang: 'বাংলা কণ্ঠ নেই', none: 'পাওয়া যায়নি' }[ttsState] || 'তৈরি হচ্ছে';
-    h += '</div><h2 class="sec">পাঠের কণ্ঠ</h2><div class="card"><div class="voice"><div><div class="vn">ফোনের নিজস্ব কণ্ঠ</div><div class="small">ফোনে বসানো বাংলা কণ্ঠ ব্যবহার করে</div></div><div class="pill' + (ttsState === 'ready' ? '' : ' wait') + '">' + st + '</div></div>';
-    if (N && N.openTtsSettings) h += '<button class="ghost" data-ttsset="1" style="margin-top:10px">কণ্ঠের সেটিং খুলুন</button>';
-    h += '<div class="sep"></div><div class="voice"><div><div class="vn">ভারতীয় বাংলা কণ্ঠ</div><div class="small">নেট ছাড়াই চলবে · পরের সংস্করণে যোগ হবে</div></div><div class="pill wait">আসছে</div></div></div>';
+    if (N && N.voiceStatus) voiceState = N.voiceStatus();
+    var vReady = voiceState === 'ready';
+    var vDown = voiceState.indexOf('downloading') === 0;
+    var active = useVoice() ? prefs.voice : 'phone';
+    h += '</div><h2 class="sec">কোন কণ্ঠে পড়বে</h2><div class="grid3">';
+    ['female', 'male', 'phone'].forEach(function (k) {
+      var off = k !== 'phone' && !vReady;
+      h += '<button class="opt' + (active === k ? ' on' : '') + '" data-voice="' + k + '"' + (off ? ' disabled style="opacity:.45"' : '') + '>' + VOICES[k] + '</button>';
+    });
+    h += '</div><h2 class="sec">পাঠের কণ্ঠ</h2><div class="card"><div class="voice"><div><div class="vn">ভারতীয় বাংলা কণ্ঠ</div><div class="small">নেট ছাড়াই চলে · নারী ও পুরুষ</div></div>';
+    if (vReady) h += '<div class="pill">বসানো আছে</div>';
+    else if (vDown) h += '<div class="pill wait" id="vpct">নামছে ' + bn(voiceState.split(':')[1] || '0') + '%</div>';
+    else if (N && N.voiceDownload) h += '<button class="ghost" data-vdl="1">নামান · ১১৯ এমবি</button>';
+    else h += '<div class="pill wait">এখানে চলে না</div>';
+    h += '</div>';
+    if (vReady) h += '<button class="ghost" data-vdel="1" style="margin-top:10px">কণ্ঠ-মডেল মুছুন</button>';
+    h += '<div class="sep"></div><div class="voice"><div><div class="vn">ফোনের নিজস্ব কণ্ঠ</div><div class="small">ফোনে বসানো বাংলা কণ্ঠ ব্যবহার করে</div></div><div class="pill' + (ttsState === 'ready' ? '' : ' wait') + '">' + st + '</div></div>';
+    if (N && N.openTtsSettings) h += '<button class="ghost" data-ttsset="1" style="margin-top:10px">ফোনের কণ্ঠের সেটিং খুলুন</button>';
+    h += '</div>';
     h += '<div class="rate"><span>পড়ার গতি</span><input id="rate" type="range" min="0.6" max="1.6" step="0.1" value="' + prefs.rate + '" aria-label="পড়ার গতি"><span id="ratev">' + rateLabel() + '</span></div>';
     h += '<div class="about">কল্পক রিডার' + (N && N.appVersion ? ' · সংস্করণ ' + esc(N.appVersion()) : '') + '<br>হরফ: Noto Serif Bengali, Noto Sans Bengali, Tiro Bangla, Hind Siliguri — SIL Open Font License 1.1-এর অধীনে ব্যবহৃত।</div>';
     app.innerHTML = h + '</div></div>' + (fromReader ? '' : nav('settings')) + '</section>';
@@ -526,6 +594,20 @@
       if (d.gap) { prefs.gap = d.gap; applyPrefs(); renderSettings(); return; }
       if (d.theme) { prefs.theme = d.theme; applyPrefs(); renderSettings(); return; }
       if (d.ttsset) { N.openTtsSettings(); return; }
+      if (d.voice) { prefs.voice = d.voice; applyPrefs(); renderSettings(); return; }
+      if (d.vdl) {
+        ask('প্রায় ১১৯ এমবি নামবে, তাই ওয়াই-ফাই থাকলে ভালো। নামানো শুরু করবেন?', 'নামান').then(function (ok) {
+          if (!ok) return;
+          N.voiceDownload(); voiceState = 'downloading:0'; renderSettings();
+        });
+        return;
+      }
+      if (d.vdel) {
+        ask('ভারতীয় বাংলা কণ্ঠ-মডেল ফোন থেকে মুছে ফেলবেন? পরে আবার নামানো যাবে।', 'মুছুন').then(function (ok) {
+          if (ok) N.voiceDelete();
+        });
+        return;
+      }
       return;
     }
     /* পাতায় ছোঁয়া: বাঁয়ে আগের পর্দা, ডানে পরের পর্দা, মাঝে দণ্ড লুকানো */

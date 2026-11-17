@@ -47,7 +47,7 @@
         var nt = next ? next.text.trim() : '';
         if (next && nt.length <= 40 && !/[।?!.…]$/.test(nt) && !numOnly.test(nt)) {
           start(title + ' · ' + nt);
-          cur.html.push('<h2><span class="chno">' + esc(t) + '</span>' + next.html + '</h2>');
+          cur.html.push('<h2><span class="chno">' + esc(t) + '</span> ' + next.html + '</h2>');
           i = blocks.indexOf(next);
         } else {
           start(title);
