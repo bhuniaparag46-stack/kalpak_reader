@@ -1,0 +1,45 @@
+name: বাংলা কণ্ঠ-মডেল
+
+on:
+  push:
+    branches: [main]
+    paths: ['voice/**', '.github/workflows/voice.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  voice:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: মূল মডেল নামানো
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view v1-checkpoints-release -R AI4Bharat/Indic-TTS --json assets --jq '.assets[] | "\(.size) \(.name)"'
+          mkdir -p work && cd work
+          gh release download v1-checkpoints-release -R AI4Bharat/Indic-TTS -p 'bn*'
+          ls -la
+          for z in *.zip; do unzip -q "$z"; done
+      - name: পাইথন লাইব্রেরি
+        run: |
+          pip install --quiet torch==2.1.2 torchaudio==2.1.2 --index-url https://download.pytorch.org/whl/cpu
+          pip install --quiet "numpy<2" TTS==0.22.0 onnx onnxruntime onnxscript
+          pip list 2>/dev/null | grep -iE "^(torch|TTS|onnx|numpy|trainer|coqpit) "
+      - name: খুলে দেখা
+        run: python voice/explore.py work
+      - name: রূপান্তর ও যাচাই
+        run: |
+          if [ -f voice/export.py ]; then python voice/export.py work out; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: voice-out
+          path: out
+          if-no-files-found: ignore
