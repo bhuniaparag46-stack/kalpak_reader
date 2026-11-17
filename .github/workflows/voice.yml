@@ -45,3 +45,13 @@ jobs:
           name: voice-out
           path: out
           if-no-files-found: ignore
+      - name: কণ্ঠ-মডেল Releases-এ রাখা
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test -f out/voc.onnx && test -f out/enc.int8.onnx && test -f out/dec.int8.onnx
+          gh release delete voice-bn-v1 --yes --cleanup-tag 2>/dev/null || true
+          gh release create voice-bn-v1 out/enc.int8.onnx out/dec.int8.onnx out/voc.onnx out/tokens.json out/*.wav \
+            --title "ভারতীয় বাংলা কণ্ঠ-মডেল (পরীক্ষামূলক)" \
+            --notes "AI4Bharat Indic-TTS (MIT লাইসেন্স) থেকে ফোনে চলার উপযোগী করে বানানো। ref-*.wav মূল মডেলের নমুনা, onnx-int8-*.wav ছোট করা মডেলের নমুনা। এটি অ্যাপ নয়; অ্যাপের APK আলাদা Release-এ থাকে।" \
+            --prerelease --target "${GITHUB_SHA}"
