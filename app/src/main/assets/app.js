@@ -353,6 +353,20 @@
       else if (view === 'settings') renderSettings();
       return;
     }
+    if (kind === 'prep') {
+      var pr = String(arg).split('-');
+      prep.done = +pr[0]; prep.total = +pr[1];
+      var pe = document.getElementById('prepbtn');
+      if (pe) pe.textContent = prepText();
+      return;
+    }
+    if (kind === 'prepdone' || kind === 'preperror') {
+      prep.on = false;
+      if (N && N.keepAwake && !tts.on) N.keepAwake(false);
+      toast(kind === 'prepdone' ? 'অধ্যায়টি তৈরি। এবার একটানা শোনা যাবে।' : 'অধ্যায় তৈরি করা গেল না। আবার চেষ্টা করুন।');
+      if (view === 'reader') renderListen();
+      return;
+    }
     if (kind === 'ready') {
       voiceState = 'ready';
       if (prefs.voice === 'phone') { prefs.voice = 'female'; applyPrefs(); }
@@ -365,6 +379,23 @@
     }
     if (view === 'settings') renderSettings();
   };
+  var prep = { on: false, done: 0, total: 0 };
+  function prepText() {
+    return prep.on ? 'তৈরি হচ্ছে ' + bn(prep.done) + '/' + bn(prep.total) + ' · থামাতে ছুঁন' : 'অধ্যায়টি আগে থেকে তৈরি করে রাখুন';
+  }
+  function prepToggle() {
+    if (prep.on) {
+      N.voicePrepCancel(); prep.on = false;
+      if (N.keepAwake && !tts.on) N.keepAwake(false);
+      renderListen(); return;
+    }
+    var list = cur.sents.filter(speakable).map(function (t) { return KVoice.norm(t); });
+    prep = { on: true, done: 0, total: list.length };
+    if (N.keepAwake) N.keepAwake(true);
+    N.voicePrepare(JSON.stringify(list), prefs.voice === 'male' ? 2 : 1);
+    toast('অধ্যায় তৈরি শুরু হল। শেষ না হওয়া পর্যন্ত অ্যাপ খোলা রাখুন।');
+    renderListen();
+  }
   function nextVoiceText() {
     if (!cur) return '';
     for (var k = tts.i + 1; k < cur.sents.length; k++) {
@@ -457,7 +488,7 @@
     if (!tts.on) return;
     tts.on = false; tts.paused = false; tts.uid++;
     nativeStop(); highlight(-1);
-    if (N && N.keepAwake) N.keepAwake(false);
+    if (N && N.keepAwake && !prep.on) N.keepAwake(false);
     if (view === 'reader' && document.getElementById('listen')) renderListen();
   }
   function ttsToggle() {
@@ -475,7 +506,8 @@
     var el = document.getElementById('listen');
     if (!el) return;
     if (!tts.on) {
-      el.innerHTML = '<button class="start" data-tts="start">' + I.ear + 'পাঠ শুনুন</button>';
+      el.innerHTML = '<button class="start" data-tts="start">' + I.ear + 'পাঠ শুনুন</button>' +
+        (useVoice() && N.voicePrepare ? '<button class="prep" id="prepbtn" data-prep="1">' + prepText() + '</button>' : '');
       return;
     }
     el.innerHTML = '<div class="info"><span id="linfo">' + esc(infoText()) + '</span><span>গতি ' + rateLabel() + '</span></div><div class="ctl">' +
@@ -530,7 +562,12 @@
     else if (N && N.voiceDownload) h += '<button class="ghost" data-vdl="1">নামান · ১১৯ এমবি</button>';
     else h += '<div class="pill wait">এখানে চলে না</div>';
     h += '</div>';
-    if (vReady) h += '<button class="ghost" data-vdel="1" style="margin-top:10px">কণ্ঠ-মডেল মুছুন</button>';
+    if (vReady) {
+      var mb = N.voiceAudioMb ? N.voiceAudioMb() : '0';
+      h += '<div class="small" style="margin-top:10px">তৈরি করে রাখা শব্দ: ' + bn(mb) + ' এমবি</div>' +
+        '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px">' + (mb !== '0' ? '<button class="ghost" data-aclear="1">তৈরি শব্দ মুছুন</button>' : '') +
+        '<button class="ghost" data-vdel="1">কণ্ঠ-মডেল মুছুন</button></div>';
+    }
     h += '<div class="sep"></div><div class="voice"><div><div class="vn">ফোনের নিজস্ব কণ্ঠ</div><div class="small">ফোনে বসানো বাংলা কণ্ঠ ব্যবহার করে</div></div><div class="pill' + (ttsState === 'ready' ? '' : ' wait') + '">' + st + '</div></div>';
     if (N && N.openTtsSettings) h += '<button class="ghost" data-ttsset="1" style="margin-top:10px">ফোনের কণ্ঠের সেটিং খুলুন</button>';
     h += '</div>';
@@ -594,6 +631,13 @@
       if (d.gap) { prefs.gap = d.gap; applyPrefs(); renderSettings(); return; }
       if (d.theme) { prefs.theme = d.theme; applyPrefs(); renderSettings(); return; }
       if (d.ttsset) { N.openTtsSettings(); return; }
+      if (d.prep) { prepToggle(); return; }
+      if (d.aclear) {
+        ask('আগে থেকে তৈরি করে রাখা সব শব্দ মুছে ফেলবেন? দরকার হলে আবার তৈরি করা যাবে।', 'মুছুন').then(function (ok) {
+          if (ok) { N.voiceAudioClear(); prep.on = false; renderSettings(); }
+        });
+        return;
+      }
       if (d.voice) { prefs.voice = d.voice; applyPrefs(); renderSettings(); return; }
       if (d.vdl) {
         ask('প্রায় ১১৯ এমবি নামবে, তাই ওয়াই-ফাই থাকলে ভালো। নামানো শুরু করবেন?', 'নামান').then(function (ok) {

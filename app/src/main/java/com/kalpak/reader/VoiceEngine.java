@@ -3,6 +3,7 @@ package com.kalpak.reader;
 import android.media.AudioAttributes;
 import android.media.AudioFormat;
 import android.media.AudioTrack;
+import android.media.PlaybackParams;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -16,6 +17,9 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.FloatBuffer;
 import java.nio.LongBuffer;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.security.MessageDigest;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -48,6 +52,8 @@ class VoiceEngine {
     private static final int MAX_TOKENS = 150;
 
     private final File dir;
+    private final File audioDir;
+    private volatile int prepGen = 0;
     private final Listener listener;
     private final ExecutorService synthExec = Executors.newSingleThreadExecutor();
     private final ExecutorService playExec = Executors.newSingleThreadExecutor();
@@ -66,6 +72,7 @@ class VoiceEngine {
 
     VoiceEngine(File filesDir, Listener listener) {
         this.dir = new File(filesDir, "voice");
+        this.audioDir = new File(filesDir, "audio");
         this.listener = listener;
     }
 
@@ -164,8 +171,8 @@ class VoiceEngine {
     void speak(final String text, final String uid, final int speaker, final double rate, final String next) {
         final int myGen = gen;
         final float r = (float) Math.max(0.5, Math.min(2.0, rate));
-        final String key = speaker + "|" + r + "|" + text;
-        final String nextKey = (next == null || next.isEmpty()) ? null : speaker + "|" + r + "|" + next;
+        final String key = speaker + "|" + text;
+        final String nextKey = (next == null || next.isEmpty()) ? null : speaker + "|" + next;
         for (String k : cache.keySet()) {
             if (!k.equals(key) && !k.equals(nextKey)) {
                 Future<short[]> f = cache.remove(k);
@@ -174,19 +181,21 @@ class VoiceEngine {
                 }
             }
         }
-        final Future<short[]> fut = cache.computeIfAbsent(key, k -> synthExec.submit(() -> synth(text, speaker, r)));
-        if (nextKey != null) {
-            cache.computeIfAbsent(nextKey, k -> synthExec.submit(() -> synth(next, speaker, r)));
+        /* আগে থেকে তৈরি থাকলে সরাসরি ফাইল থেকে বাজে, মডেলের সারিতে দাঁড়াতে হয় না */
+        final boolean ready = audioFile(speaker, text).exists();
+        final Future<short[]> fut = ready ? null : cache.computeIfAbsent(key, k -> synthExec.submit(() -> pcmFor(text, speaker)));
+        if (nextKey != null && !audioFile(speaker, next).exists()) {
+            cache.computeIfAbsent(nextKey, k -> synthExec.submit(() -> pcmFor(next, speaker)));
         }
         playExec.submit(() -> {
             try {
-                short[] pcm = fut.get();
+                short[] pcm = ready ? readPcm(audioFile(speaker, text)) : fut.get();
                 cache.remove(key);
                 if (myGen != gen) {
                     return;
                 }
                 listener.event("kalpakTts", "start", uid);
-                play(pcm, myGen);
+                play(pcm, myGen, r);
                 if (myGen == gen) {
                     listener.event("kalpakTts", "done", uid);
                 }
@@ -197,6 +206,115 @@ class VoiceEngine {
                 }
             }
         });
+    }
+
+    /* ---------- অধ্যায় আগে থেকে তৈরি করে রাখা ---------- */
+
+    void prepare(final List<String> sentences, final int speaker) {
+        final int myPrep = ++prepGen;
+        prepStep(sentences, speaker, 0, myPrep);
+    }
+
+    private void prepStep(final List<String> sentences, final int speaker, final int index, final int myPrep) {
+        /* প্রতি বাক্যের পর সারিতে নতুন করে দাঁড়ায়, যাতে চলতি পাঠের বাক্য আগে সুযোগ পায় */
+        synthExec.submit(() -> {
+            if (myPrep != prepGen) {
+                return;
+            }
+            if (index >= sentences.size()) {
+                listener.event("kalpakVoice", "prepdone", "");
+                return;
+            }
+            try {
+                pcmFor(sentences.get(index), speaker);
+            } catch (Throwable e) {
+                listener.event("kalpakVoice", "preperror", "");
+                return;
+            }
+            listener.event("kalpakVoice", "prep", (index + 1) + "-" + sentences.size());
+            prepStep(sentences, speaker, index + 1, myPrep);
+        });
+    }
+
+    void cancelPrepare() {
+        prepGen++;
+    }
+
+    long audioBytes() {
+        long total = 0;
+        File[] fs = audioDir.listFiles();
+        if (fs != null) {
+            for (File f : fs) {
+                total += f.length();
+            }
+        }
+        return total;
+    }
+
+    void clearAudio() {
+        prepGen++;
+        File[] fs = audioDir.listFiles();
+        if (fs != null) {
+            for (File f : fs) {
+                f.delete();
+            }
+        }
+    }
+
+    private File audioFile(int speaker, String text) {
+        String name;
+        try {
+            byte[] d = MessageDigest.getInstance("SHA-1").digest((speaker + "|" + text).getBytes(StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder();
+            for (byte b : d) {
+                sb.append(String.format("%02x", b));
+            }
+            name = sb.toString();
+        } catch (Exception e) {
+            name = "h" + (speaker + "|" + text).hashCode();
+        }
+        return new File(audioDir, name + ".pcm");
+    }
+
+    /** বাক্যের শব্দ: জমানো থাকলে সেখান থেকে, নইলে মডেল চালিয়ে বানিয়ে জমিয়ে রাখা। */
+    private short[] pcmFor(String text, int speaker) throws Exception {
+        File f = audioFile(speaker, text);
+        if (f.exists()) {
+            return readPcm(f);
+        }
+        short[] pcm = synth(text, speaker, 1f);
+        try {
+            if (!audioDir.exists()) {
+                audioDir.mkdirs();
+            }
+            File part = new File(audioDir, f.getName() + ".part");
+            ByteBuffer bb = ByteBuffer.allocate(pcm.length * 2).order(ByteOrder.LITTLE_ENDIAN);
+            bb.asShortBuffer().put(pcm);
+            try (FileOutputStream out = new FileOutputStream(part)) {
+                out.write(bb.array());
+            }
+            part.renameTo(f);
+        } catch (Exception ignored) {
+            /* জমাতে না পারলেও বাজানো চলবে */
+        }
+        return pcm;
+    }
+
+    private short[] readPcm(File f) throws Exception {
+        byte[] data = new byte[(int) f.length()];
+        try (FileInputStream in = new FileInputStream(f)) {
+            int off = 0;
+            while (off < data.length) {
+                int n = in.read(data, off, data.length - off);
+                if (n <= 0) {
+                    break;
+                }
+                off += n;
+            }
+        }
+        short[] pcm = new short[data.length / 2];
+        ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer().get(pcm);
+        return pcm;
     }
 
     void stop() {
@@ -222,7 +340,7 @@ class VoiceEngine {
         }
     }
 
-    private void play(short[] pcm, int myGen) throws InterruptedException {
+    private void play(short[] pcm, int myGen, float rate) throws InterruptedException {
         AudioTrack t = track;
         if (t == null) {
             int min = AudioTrack.getMinBufferSize(SR, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT);
@@ -241,6 +359,12 @@ class VoiceEngine {
                     .build();
             track = t;
         }
+        try {
+            /* গতি বদলালেও গলার স্বর একই থাকে */
+            t.setPlaybackParams(new PlaybackParams().setSpeed(rate).setPitch(1f));
+        } catch (Exception ignored) {
+            /* কিছু ফোনে গতি বদল চলে না; তখন স্বাভাবিক গতিতে বাজবে */
+        }
         t.play();
         int start = t.getPlaybackHeadPosition();
         int off = 0;
@@ -251,7 +375,7 @@ class VoiceEngine {
             }
             off += n;
         }
-        long deadline = System.currentTimeMillis() + pcm.length * 1000L / SR + 1500;
+        long deadline = System.currentTimeMillis() + (long) (pcm.length * 1000L / SR / Math.max(0.5f, rate)) + 1500;
         while (myGen == gen && t.getPlaybackHeadPosition() - start < off && System.currentTimeMillis() < deadline) {
             Thread.sleep(20);
         }

@@ -328,6 +328,35 @@ public class MainActivity extends Activity {
         }
 
         @JavascriptInterface
+        public void voicePrepare(String json, int speaker) {
+            try {
+                org.json.JSONArray a = new org.json.JSONArray(json);
+                java.util.List<String> list = new java.util.ArrayList<>();
+                for (int i = 0; i < a.length(); i++) {
+                    list.add(a.getString(i));
+                }
+                voice.prepare(list, speaker);
+            } catch (Exception ignored) {
+                /* তালিকা পড়া না গেলে কিছু হবে না */
+            }
+        }
+
+        @JavascriptInterface
+        public void voicePrepCancel() {
+            voice.cancelPrepare();
+        }
+
+        @JavascriptInterface
+        public String voiceAudioMb() {
+            return String.valueOf(Math.round(voice.audioBytes() / 1048576.0));
+        }
+
+        @JavascriptInterface
+        public void voiceAudioClear() {
+            voice.clearAudio();
+        }
+
+        @JavascriptInterface
         public void voiceStop() {
             voice.stop();
         }
