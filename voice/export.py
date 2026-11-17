@@ -24,6 +24,11 @@ HG = os.path.join(root, "bn", "hifigan")
 
 from TTS.utils.synthesizer import Synthesizer
 
+# config.json-এ বক্তা-তালিকার যে পথ লেখা আছে, সেখানেই ফাইলটা রেখে দেওয়া
+import shutil
+os.makedirs("models/v1/bn/fastpitch", exist_ok=True)
+shutil.copy(os.path.join(FP, "speakers.pth"), "models/v1/bn/fastpitch/speakers.pth")
+
 synth = Synthesizer(
     tts_checkpoint=os.path.join(FP, "best_model.pth"),
     tts_config_path=os.path.join(FP, "config.json"),

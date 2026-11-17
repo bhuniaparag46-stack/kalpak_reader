@@ -18,22 +18,24 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.10'
+      - uses: actions/cache@v4
+        id: model
+        with:
+          path: work/bn
+          key: indic-tts-bn-v1
       - name: মূল মডেল নামানো
+        if: steps.model.outputs.cache-hit != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release view v1-checkpoints-release -R AI4Bharat/Indic-TTS --json assets --jq '.assets[] | "\(.size) \(.name)"'
           mkdir -p work && cd work
-          gh release download v1-checkpoints-release -R AI4Bharat/Indic-TTS -p 'bn*'
-          ls -la
-          for z in *.zip; do unzip -q "$z"; done
+          gh release download v1-checkpoints-release -R AI4Bharat/Indic-TTS -p 'bn.zip'
+          unzip -q bn.zip && rm bn.zip
       - name: পাইথন লাইব্রেরি
         run: |
           pip install --quiet torch==2.1.2 torchaudio==2.1.2 --index-url https://download.pytorch.org/whl/cpu
           pip install --quiet "numpy<2" TTS==0.22.0 onnx onnxruntime onnxscript
           pip list 2>/dev/null | grep -iE "^(torch|TTS|onnx|numpy|trainer|coqpit) "
-      - name: খুলে দেখা
-        run: python voice/explore.py work
       - name: রূপান্তর ও যাচাই
         run: |
           if [ -f voice/export.py ]; then python voice/export.py work out; fi
